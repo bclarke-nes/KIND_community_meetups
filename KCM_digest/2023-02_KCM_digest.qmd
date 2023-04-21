@@ -1,0 +1,482 @@
+---
+title: "R training catchup day digest, Feb 2023"
+date: "03-09-2023"
+---
+
+```{r}
+#| warning: false
+#| echo: false
+library(pacman)
+p_load(tidyverse)
+```
+
+::: panel-tabset
+## Adding centred labels in ggplot
+
+### What's the problem?
+This was a question about producing a labelled stacked column graph where the labels quantified the percentage contribution of each group to the bar. Here's the data, which is a summarised version of `mtcars`:
+
+```{r}
+cars <- tribble(
+   ~cyl,   ~size,  ~n, ~rate,
+    "4",   "big",  2L, 18.2,
+    "4", "small",  9L, 81.8,
+    "6",   "big",  4L, 57.1,
+    "6", "small",  3L, 42.9,
+    "8",   "big", 14L, 100
+   )
+
+cars %>%
+  ggplot(aes(x=cyl, y=rate, fill=size)) +
+  geom_col() +
+  geom_label(
+    aes(label=paste(round(rate), "%", sep="")), 
+    position = position_stack(vjust = 0.5), 
+    color="black")
+```
+
+The key here is `position_stack`, which allows us to paste a rounded rate into the correct vertical position on the graph.
+
+## Grouping by levels
+
+### What's the problem?
+
+Imagine you have some data like this:
+
+```{r}
+#| echo: false
+df <- tibble(Organism = c("Campylobacter coli", "Campylobacter jejuni","Campylobacter lari",  "Shigella flexnari", "Shigella dysenteriae", "Yersinia", "Ebola", "Rickettsia", "Vibrio cholerae"), value = c(5,6,3,4, 11, 7, 5, 7, 6))
+
+df %>% knitr::kable()
+
+```
+
+How can we choose to aggregate this data so that we can get the values both for individual species (as it is above), but also grouped so that we get the total values for all the *Campylobacter*s, all the *Shigella*s and so on?
+
+### Solution 1: use separate() and then group and summarise()
+
+```{r}
+#| warning: false
+df %>%
+  separate(Organism, into=c("genera", "species"), remove=F) %>%
+  group_by(genera) %>%
+  summarise(value = sum(value)) %>%
+  knitr::kable()
+```
+
+This is quick and easy, and has the advantage that you can choose to keep or remove the original organism column via the `remove` argument.
+
+The first approach assumes that the parts that you want to aggregate are standardised. If that's not the case an alternative strategy might be...
+
+### Solution 2: use a case_when() mutate to add a grouping column manually
+
+```{r}
+df %>%
+  mutate(genera = (
+    case_when(
+      str_detect(Organism, "Camp") ~ "Campylobacter spp",
+      str_detect(Organism, "Ebola") ~ "Just Ebola",
+      str_detect(Organism, "Shig") ~ "Shigella", 
+      TRUE ~ Organism
+    )
+  )) %>%
+  group_by(genera) %>%
+  summarise(value = sum(value)) %>%
+  knitr::kable()
+  
+```
+
+We use `str_detect()` to search through the Organism column, and conditionally fill in values in genera. You'll note here that we have much finer-grained control over how things get grouped together, and can specify different descriptions of each of the groups. This comes at the cost of building the more fiddly `case_when()` syntax.
+
+## How to specify the colour of lines in plotly?
+
+### What's the problem?
+
+plotly typically uses colour to represent values in the data. Specifying a single colour for a data series can lead to odd results. We'll plot the following data:
+
+```{r}
+#| warning: false
+library(lubridate)
+library(plotly)
+library(tidyverse)
+
+df <- tibble::tribble(
+         ~Date, ~Count, ~Target,
+  "01/01/2019",  20000,      15,
+  "01/02/2019",   6000,      16,
+  "01/03/2019",  19000,      18,
+  "01/04/2019",  20000,      20,
+  "01/05/2019",  17000,      16,
+  "01/06/2019",  21000,      81,
+  "01/07/2019",  20000,      21,
+  "01/08/2019",   6000,      55,
+  "01/09/2019",  19000,      64,
+  "01/10/2019",  20000,      24
+                  ) %>%
+  mutate(Date = dmy(Date))
+```
+
+If we specify a hex value for our plotly bars, we get some cryptic error messages and a baffling result:
+
+```{r}
+plot_ly(
+  df,
+  x = ~ Date,
+  y = ~ Count,
+  type = "bar",
+  color = "#199599"
+  )
+```
+
+The same odd behaviour occurs with other types of plot:
+
+```{r}
+plot_ly(
+  df, 
+  x = ~ Date,
+  y = ~ Target,
+  type = "scatter",
+  mode = "lines",
+  color = "#FF00FF",
+  line = list(width = 4)
+  )
+```
+
+### Solution: use asis (I()) to use hex colour values
+
+This is an easy fix, once you understand the cause. plot_ly expects a colour palette (say, ColorBrewer) inside the `color` argument. When a hex value is supplied, plot_ly looks for a palette that shares a name with the hex value, fails, and defaults to the built-in colour palette. So simply wrapping the hex value in I() prevents that
+
+```{r}
+plot_ly(
+  df, 
+  x = ~ Date,
+  y = ~ Target,
+  type = "scatter",
+  mode = "lines",
+  color = I("#FF00FF"),
+  line = list(width = 4)
+  )
+```
+
+As an additional tip, one useful strategy for debugging more complicated plotly objects is to break them into stages by assigning the first part to an interim variable name, and then using the pipe with `layout`, `add_trace` etc to add layers. That allows you to check that each layer is behaving as expected:
+
+```{r}
+fig <- plot_ly(
+  df,
+  x = ~ Date,
+  y = ~ Count,
+  type = "bar",
+  color = I("#199599"),
+  name = "Colourful bars"
+  )
+
+fig <- fig %>%
+  layout(
+    yaxis2 = list(
+      title = NA,
+      overlaying = "y",
+      side = "right",
+      tickvals = seq(0, 100, 10),
+      range = c(0, 100),
+      ticks = "outside",
+      showgrid = FALSE,
+      showline = TRUE,
+      #mirror = "ticks",
+      showticklabels = TRUE,
+      linecolor = "black",
+      #linewidth = 1.5,
+      automargin = TRUE
+    )
+  )
+
+fig <- fig %>%
+  add_trace(
+  df, 
+  x = ~ Date,
+  y = ~ Target,
+  yaxis = "y2",
+  type = "scatter",
+  mode = "lines",
+  color = I("#FF00FF"),
+  line = list(width = 4),
+  name = "Colourful line"
+  )
+
+fig %>%
+  layout(
+    legend = list(orientation = "h", xanchor = "center", x = 0.5),showlegend = TRUE)
+
+```
+
+## How to generate bits of data for examples?
+
+### What's the problem?
+
+Imagine that you want to share some R code with someone without having to share all your data. Making toy data from scratch is slow, and can be tricky to share.
+
+### Solution 1: datapasta
+
+This is the solution that I use for these examples. It allows you to take some data from your R environment, and turn it into a data frame / tribble that can be copied and pasted into a new place. These functions output straight into your R script, meaning that their Quarto output is odd to say the least, which is why this chunk is not set to evaluate.
+
+```{r}
+#| eval: false
+
+library(datapasta) 
+
+head(mtcars) %>% knitr::kable()
+
+datapasta::tribble_paste(head(mtcars))
+
+tibble::tribble(
+   ~mpg, ~cyl, ~disp, ~hp, ~drat,   ~wt, ~qsec, ~vs, ~am, ~gear, ~carb,
+     21,    6,   160, 110,   3.9,  2.62, 16.46,   0,   1,     4,     4,
+     21,    6,   160, 110,   3.9, 2.875, 17.02,   0,   1,     4,     4,
+   22.8,    4,   108,  93,  3.85,  2.32, 18.61,   1,   1,     4,     1,
+   21.4,    6,   258, 110,  3.08, 3.215, 19.44,   1,   0,     3,     1,
+   18.7,    8,   360, 175,  3.15,  3.44, 17.02,   0,   0,     3,     2,
+   18.1,    6,   225, 105,  2.76,  3.46, 20.22,   1,   0,     3,     1
+   )
+
+datapasta::dpasta(head(mtcars))
+
+data.frame(
+  row.names = c("Mazda RX4","Mazda RX4 Wag",
+                "Datsun 710","Hornet 4 Drive","Hornet Sportabout","Valiant"),
+     mpg = c(21, 21, 22.8, 21.4, 18.7, 18.1),
+     cyl = c(6, 6, 4, 6, 8, 6),
+    disp = c(160, 160, 108, 258, 360, 225),
+      hp = c(110, 110, 93, 110, 175, 105),
+    drat = c(3.9, 3.9, 3.85, 3.08, 3.15, 2.76),
+      wt = c(2.62, 2.875, 2.32, 3.215, 3.44, 3.46),
+    qsec = c(16.46, 17.02, 18.61, 19.44, 17.02, 20.22),
+      vs = c(0, 0, 1, 1, 0, 1),
+      am = c(1, 1, 1, 0, 0, 0),
+    gear = c(4, 4, 4, 3, 3, 3),
+    carb = c(4, 4, 1, 1, 2, 1)
+)
+
+```
+
+### Solution 2: use dput()
+
+`dput()` has been very widely used - it's (part of the guidance on producing reproducible examples found on Stack Overflow)[https://stackoverflow.com/questions/5963269/how-to-make-a-great-r-reproducible-example], for example. While easy to use, it can produce rather complicated and messy output. But definitely worth knowing about:
+
+```{r}
+dput(head(mtcars))
+```
+
+(and the standard output is nice to have too if you're working in Quarto)
+
+## Extracting data from pdf, docx, xlsx...
+
+### What's the problem?
+While it's possible to use R as a way of extracting data from other formats, there are some complications particularly around checking that your data has loaded correctly. Let's create some fake data, write it to the three formats, then try to read it back. We'll finish off with a few ideas about testing.
+
+```{r}
+library(pacman)
+p_load(tidyverse, readxl)
+
+# here's our sample data
+data <- tibble(
+          date = as_date(dmy("01/01/2022"):dmy("01/01/2023")),
+          values = sample(seq(1, 20, by=0.1), size = 366, replace = T)
+          ) %>%
+        rowwise() %>%
+        mutate(word = paste(sample(LETTERS, 15, replace = TRUE), collapse = "")) %>%
+        ungroup()
+    
+head(data) %>%
+  knitr::kable()
+```
+
+::: panel-tabset
+### xlsx
+
+As might be expected, Excel is pretty straightforward, but is still useful for looking at some of the pitfalls and tricks for checking that data pulled from other formats is correct:
+
+```{r}
+# write the data to file
+writexl::write_xlsx(data, "data/xl.xlsx")
+
+#read the data back from file
+data_xl <- readxl::read_xlsx("data/xl.xlsx")
+```
+
+There are minor differences owing to the way that Excel stores dates as datetimes, which can be fixed easily. However, a more subtle error can be found in the values column:
+
+```{r}
+setequal(data_xl, data)
+
+data_xl_class <- data_xl %>%
+  mutate(date = as.Date(date))
+
+setequal(data_xl_class, data)
+
+setequal(data_xl_class$values, data$values)
+
+comparison <- tibble(
+  original = data$values, 
+  back = data_xl_class$values
+  ) %>%
+  mutate(
+    comparison = case_when(
+    (original == back) ~ "fine",
+    T ~ "NOT FINE!!"
+  )) 
+
+comparison %>%
+  filter(comparison == "NOT FINE!!") %>%
+  slice(1:5) %>%
+  knitr::kable()
+
+```
+
+This is a floating point error, and so we're in the [first circle of the R inferno](https://www.burns-stat.com/pages/Tutor/R_inferno.pdf). Here, the problem is not that our data is getting garbled, and more that the `==` equality operator is dangerous for comparing doubles. Two better choices for this kind of comparison are:
+
+```{r}
+all.equal(data_xl_class$values, data$values)
+
+near(data_xl_class$values, data$values)[1:30]
+```
+
+### docx
+
+Let's take the same data tibble from above, and create a Word document containing it as a table. The best way to do this for a single table is using `flextable`:
+
+```{r}
+p_load(docxtractr, flextable)
+
+flextable(data) %>% save_as_docx(path = "data/word.docx")
+```
+
+We can then read this back and fix the types:
+
+```{r}
+doc <- docxtractr::read_docx("data/word.docx")
+
+data_docx <- docxtractr::docx_extract_tbl(doc) %>%
+  mutate(date = ymd(date)) %>%
+  mutate(values = as.numeric(values))
+
+setequal(data$date, data_docx$date)
+near(data$values, data_docx$values)[30] # to avoid the floating-point problem
+setequal(data$word, data_docx$word)
+
+
+```
+
+### pdf
+
+Again, create a pdf from the data:
+
+```{r}
+p_load(gt, webshot2)
+
+gt(data) %>%
+  gtsave("data/pdf.pdf")
+
+```
+
+It's then possible to use pdftools to read that (multipage) table back into R:
+
+```{r}
+p_load(pdftools)
+data_pdf <- pdftools::pdf_data("data/pdf.pdf")
+```
+
+We get a list back, with one item per page. It's possible to join each of those list items back into a tidy tibble:
+
+```{r}
+#| warning: false
+labels <- c("date", "values", "word")
+
+page_data <- data_pdf[[1]]$text
+page_data <- page_data[!page_data %in% labels]
+
+page_data <- as_tibble(page_data) %>%
+   mutate(ind = rep_len(labels, length.out=length(page_data))) %>%
+  pivot_wider(names_from = ind, values_from=value) %>%
+  unnest(cols = c(date, values, word))
+```
+
+That's a bit messy, but things get better when we wrap it into a function, and `map_dfr` over the list:
+
+```{r}
+#| warning: false
+unwrap_data <- function(index) {
+  
+page_data <- data_pdf[[index]]$text
+page_data <- page_data[!page_data %in% labels]
+
+as_tibble(page_data) %>%
+  mutate(ind = rep_len(labels, length.out=length(page_data))) %>%
+  pivot_wider(names_from = ind, values_from=value) %>%
+  unnest(cols = c(date, values, word)) %>%
+  mutate(date = ymd(date)) %>%
+  mutate(values = as.numeric(values))
+}
+
+data_pdf <- map_dfr(1:length(data_pdf), unwrap_data)
+
+```
+
+Okay, so much more work to get to our destination compared to Word or pdf, but three passing checks.
+
+```{r}
+
+setequal(data$date, data_pdf$date)
+near(data$values, data_pdf$values)[30] # to avoid the floating-point problem
+setequal(data$word, data_pdf$word)
+
+```
+
+### testing
+
+We had three simple tests running informally through this data wrangling, but it might be nice to put together a test function to check that our data is loading properly.
+
+```{r}
+p_load(glue, rlang)
+test_data <- function(file) {
+  
+  filename <- paste("**Test results for", enquo(file), "**")
+  
+  cat(filename[2])
+  if(nrow(data) == nrow(file)){
+    cat("  \n+ passed length check")
+  } else {
+    cat("  \n+ **did not** pass length check")
+  } 
+  
+  if(setequal(data$date, file$date)) {
+    cat("  \n+ passed date check")
+  } else {
+    cat("  \n+ **did not** pass date check")
+  }
+  
+  if(all(near(data$values, file$values))) {
+    cat("  \n+ passed values check")
+  } else {
+    cat("  \n+ **did not** pass values check")
+  }
+  
+   if(setequal(data$word, file$word)) {
+    cat("  \n+ passed word check")
+  } else {
+    cat("  \n+ **did not** pass word check")
+  }
+  
+  }
+```
+
+```{r}
+#| warning: false
+#| results: asis
+test_data(data_xl)
+test_data(data_xl_class)
+test_data(data_docx)
+test_data(data_pdf)
+```
+:::
+
+
+:::
