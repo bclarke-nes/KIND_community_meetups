@@ -56,3 +56,6 @@ n_words(middlemarch, 50)
 
 austen <- book_learnin(31100) # Austen
 n_words(austen, 50)
+
+big <- book_learnin(1:500)
+n_words(big, 50)
