@@ -3,8 +3,7 @@
 *.docx
 /archive
 knit_list.r
-/iteration_*
-/purrr_*
+*.rds
 # History files
 .Rhistory
 .Rapp.history
