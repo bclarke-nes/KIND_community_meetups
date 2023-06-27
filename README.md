@@ -8,5 +8,8 @@ Supporting materials for checking and testing session run by John Mackintosh (NH
 ## 2023-04-25 chaptgpt ML
 A simple Markov chain-based text generator in R, using Project Gutenberg texts as source material
 
+## 2023-06-27 R Python Julia
+A beginner's session comparing R, Python, and Julia
+
 ## KCM_digest
 Selection of R-based problems identified during community training sessions
